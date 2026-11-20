@@ -7,7 +7,7 @@
 //! launcher's data folder only when asked, the game's folder never.
 //!
 //! Nothing here deletes a folder it didn't make: the install folder is always called
-//! "Horizon Launcher" ([`folder_for`]) and is removed with `remove_dir`, which only takes an empty one.
+//! "Open Horizon Launcher" ([`folder_for`]) and is removed with `remove_dir`, which only takes an empty one.
 //!
 //! Command lines (handled in `main` before the CLI parser, so MCP never sees them):
 //! `horizon-launcher-setup.exe` (window), `... setup --quiet [--dir <folder>] [--desktop-shortcut]`,
@@ -21,12 +21,12 @@ use std::path::{Path, PathBuf};
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use winreg::RegKey;
 
-pub const APP_NAME: &str = "Horizon Launcher";
+pub const APP_NAME: &str = crate::brand::LAUNCHER;
 const BINARY: &str = "horizon-launcher.exe";
-const PUBLISHER: &str = "Horizon";
+const PUBLISHER: &str = crate::brand::NAME;
 const ABOUT_URL: &str = horizon_addresses::LAUNCHER_ABOUT;
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\HorizonLauncher";
-const OWN_KEY: &str = r"Software\Horizon\Launcher";
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenHorizonLauncher";
+const OWN_KEY: &str = r"Software\OpenHorizon\Launcher";
 const ASIDE_PREFIX: &str = "horizon-launcher-uninstall-";
 
 pub use crate::setup_args::Mode;

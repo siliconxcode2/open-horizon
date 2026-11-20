@@ -6,6 +6,10 @@ use crate::i18n::{tr, trf};
 use crate::instances::{self, Instance};
 use crate::rust_toolchain::{self, Toolchain};
 use sha2::{Digest, Sha256};
+
+/// Native mods build against upstream Horizon's published mod SDK (`horizon_addresses::SDK_RELEASES`)
+/// until Open Horizon publishes its own, so the SDK is checked with upstream's keys.
+const UPSTREAM_SDK_REPO: &str = "horizon-rust/horizon";
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -812,7 +816,7 @@ pub fn revision_of(version: &str) -> Result<String, String> {
     sdk_cache::build_of(
         version,
         &sdk_cache::Base::from_env(),
-        &horizon_release_sign::sdk_keys_for(backend::REPO),
+        &horizon_release_sign::sdk_keys_for(UPSTREAM_SDK_REPO),
     )
     .map_err(|refusal| refusal.to_string())
 }
@@ -2102,7 +2106,7 @@ fn pipeline(
     let revision = build_revision(base, built_on.as_ref())?;
     let developer = crate::developer_install::is_developer(origin);
     let sdk_base = sdk_cache::Base::from_env();
-    let keys = horizon_release_sign::sdk_keys_for(backend::REPO);
+    let keys = horizon_release_sign::sdk_keys_for(UPSTREAM_SDK_REPO);
     // A developer install's checkout has no published surface to test against: its mods are
     // made for it exactly. Any other build tests each mod made for another build (SDK design §10).
     let sdk = if developer {

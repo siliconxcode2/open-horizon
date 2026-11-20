@@ -84,7 +84,7 @@ impl LaunchArguments {
                     |(_, value)| value.map(OsStr::to_owned),
                 )
         };
-        let default_home = data_dir_with(env).join("horizon");
+        let default_home = data_dir_with(env).join("open-horizon");
         let args: Result<Vec<_>, _> = command
             .get_args()
             .map(|arg| {

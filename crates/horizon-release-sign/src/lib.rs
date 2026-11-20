@@ -30,6 +30,10 @@ pub const SIGNATURE_V2: &str = "SHA256SUMS.v2.sig";
 
 const KEYS: &str = include_str!("../release-keys.txt");
 const LEGACY: &str = include_str!("../legacy-releases.txt");
+/// Open Horizon's own release keys, for [`OPEN_HORIZON_REPO`].
+const OPEN_HORIZON_KEYS: &str = include_str!("../open-horizon-keys.txt");
+/// The fork this build belongs to: its launcher and server install releases from here.
+pub const OPEN_HORIZON_REPO: &str = "siliconxcode2/open-horizon";
 
 /// An Ed25519 public key.
 pub type PublicKey = [u8; 32];
@@ -37,7 +41,7 @@ pub type PublicKey = [u8; 32];
 /// The public keys built in: those in `release-keys.txt`. A file that doesn't parse gives none,
 /// so every download is refused rather than trusted (a test keeps the file valid).
 pub fn trusted_keys() -> Vec<PublicKey> {
-    trusted_keys_for("horizon-rust/horizon")
+    trusted_keys_for(OPEN_HORIZON_REPO)
 }
 
 /// Repository-scoped release trust: `release-keys.txt` for horizon-rust/horizon. Any other repository has no
@@ -92,6 +96,7 @@ fn extra_sdk_keys() -> Vec<PublicKey> {
 fn repository_keys<'a>(repository: &str, keys: &'a str) -> &'a str {
     match repository {
         "horizon-rust/horizon" => keys,
+        OPEN_HORIZON_REPO => OPEN_HORIZON_KEYS,
         _ => "",
     }
 }

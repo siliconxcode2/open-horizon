@@ -628,7 +628,10 @@ fn table(language: Language) -> &'static Table {
                 serde_json::from_str::<HashMap<String, String>>(l.source())
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|(en, said)| (en, &*Box::leak(said.into_boxed_str())))
+                    .map(|(en, said)| {
+                        let said = crate::brand::apply(&said).into_owned();
+                        (en, &*Box::leak(said.into_boxed_str()))
+                    })
                     .collect()
             })
             .collect()
@@ -642,7 +645,10 @@ fn table(language: Language) -> &'static Table {
 
 /// `en` in `language`, or `en` itself where the table lacks it.
 pub fn tr_in(language: Language, en: &str) -> &str {
-    table(language).get(en).copied().unwrap_or(en)
+    match table(language).get(en) {
+        Some(said) => said,
+        None => crate::brand::apply_static(en),
+    }
 }
 
 /// `en` in the launcher's language.

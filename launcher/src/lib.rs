@@ -2,6 +2,7 @@
 pub mod account;
 pub mod agents;
 pub mod backend;
+pub mod brand;
 pub mod browser;
 pub mod build_import;
 pub mod data_location;

@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <title>Horizon</title>
-  <g fill="#16181f"><rect x="4" y="3" width="2" height="4"/><rect x="10" y="3" width="2" height="4"/></g>
-  <g fill="#16181f" opacity=".36"><rect x="4" y="8" width="2" height="4"/><rect x="10" y="8" width="2" height="4"/></g>
+  <title>Open Horizon</title>
+  <g fill="#16181f"><rect x="3" y="3" width="2" height="4"/><rect x="11" y="3" width="2" height="4"/></g>
+  <g fill="#16181f" opacity=".36"><rect x="3" y="8" width="2" height="4"/><rect x="11" y="8" width="2" height="4"/></g>
+  <path d="M5.9 7a2.1 2.1 0 0 1 4.2 0h-1a1.1 1.1 0 0 0-2.2 0z" fill="#e08a1a"/>
+  <path d="M5.9 8a2.1 2.1 0 0 0 4.2 0h-1a1.1 1.1 0 0 1-2.2 0z" fill="#e08a1a" opacity=".36"/>
   <rect x="1" y="7" width="14" height="1" fill="#5b3fd6"/>
 </svg>

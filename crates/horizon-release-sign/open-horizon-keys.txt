@@ -1,0 +1,3 @@
+# The public keys Open Horizon's releases (siliconxcode2/open-horizon) are signed with: one base64 Ed25519 key
+# per line. The private half is the RELEASE_SIGNING_KEY secret of the fork's `release` environment.
+QNGYEKVJTr/CZgK1Fx9Jxdnm/CcZ4Y1sd/s39owAROg=

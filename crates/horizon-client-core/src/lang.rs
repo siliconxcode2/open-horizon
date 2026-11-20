@@ -551,6 +551,14 @@ impl Language {
         {
             apply_deprecated(&mut map, &bytes);
         }
+        // Open Horizon's name on Horizon's own text; vanilla's and packs' other keys stay as written.
+        for (key, value) in map.iter_mut() {
+            if key.starts_with("horizon.") {
+                if let std::borrow::Cow::Owned(renamed) = crate::brand::apply(value) {
+                    *value = renamed;
+                }
+            }
+        }
         let bidirectional = available(sources)
             .iter()
             .any(|info| info.code == code && info.bidirectional);
