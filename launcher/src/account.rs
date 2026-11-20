@@ -12,6 +12,7 @@
 //!
 //! The Azure app (client ID) is Horizon's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
 //! build time, or at run time to override it. Without one, sign-in says it is not configured.
+pub mod open;
 pub mod session;
 
 use serde_json::{json, Value};
@@ -1749,6 +1750,9 @@ pub struct Accounts {
     /// `offline_selected` and `looks` are dropped on read.
     #[serde(default, rename = "offline", skip_serializing)]
     old_offline: Vec<String>,
+    /// Open Horizon: each account's kind by UUID (`open::Kind`); one not listed is Microsoft.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub kinds: HashMap<String, open::Kind>,
 }
 
 /// The secrets an account keeps in `store`, if it still has them there.
@@ -1867,6 +1871,16 @@ impl Accounts {
     /// Whether an account here owned the game at its last check (the keychain's answer, no
     /// request): what Play needs.
     pub fn has_owner(&self, store: &dyn SecretStore) -> bool {
+        // Open Horizon: an offline or Ely.by account plays under its name (`launch_for_game`).
+        // Downloading Minecraft still asks a Microsoft account (`launch`), never this.
+        self.selected()
+            .is_some_and(|a| self.kind(&a.uuid).plays_by_name())
+            || self.has_microsoft_owner(store)
+    }
+
+    /// Whether a Microsoft account here owned the game at its last check: who Mojang's download
+    /// is for.
+    pub fn has_microsoft_owner(&self, store: &dyn SecretStore) -> bool {
         // The selected account first: it owning the game ends the search after one account's
         // item — every account's item read can ask for the keychain (macOS, #4912).
         self.selected()
@@ -1895,6 +1909,7 @@ impl Accounts {
     pub fn remove(&mut self, store: &dyn SecretStore, uuid: &str) -> Result<(), String> {
         let _operation = session::lock(store)?;
         store.delete(uuid)?;
+        self.forget_open(store, uuid)?;
         self.accounts.retain(|a| a.uuid != uuid);
         if self.selected.as_deref() == Some(uuid) {
             self.selected = None;
@@ -1949,6 +1964,9 @@ pub struct Launch {
     /// A renewed sign-in the keychain refused to keep: it plays now, and may have to sign in
     /// again next time.
     pub unsaved: Option<String>,
+    /// Open Horizon: the name an offline or Ely.by account plays under (`--name`), with no
+    /// Microsoft session.
+    pub plays_as: Option<String>,
 }
 
 /// The last [`Launch::unsaved`], for the window or the terminal to show once.
@@ -1979,6 +1997,10 @@ pub fn launch(
     for account in order {
         if owned {
             break;
+        }
+        // Offline and Ely.by accounts never own the game for Mojang: only Microsoft ones answer.
+        if accounts.kind(&account.uuid).plays_by_name() {
+            continue;
         }
         let plays = Some(&account.uuid) == selected.as_ref();
         let operation = session::lock(store);
@@ -2067,6 +2089,17 @@ pub fn launch_for_game(
 ) -> Result<Launch, NoOwner> {
     if accounts.selected().is_none() {
         accounts.selected = accounts.accounts.first().map(|a| a.uuid.clone());
+    }
+    // Open Horizon: an offline or Ely.by account plays under its name on game files the player
+    // already has (prepared from their own Java Edition, or downloaded once for an owner).
+    if let Some(account) = accounts
+        .selected()
+        .filter(|a| accounts.kind(&a.uuid).plays_by_name())
+    {
+        return Ok(Launch {
+            plays_as: Some(account.name.clone()),
+            ..Launch::default()
+        });
     }
     let pass = launch(ep, client_id, store, accounts)?;
     let owns = accounts
@@ -2313,6 +2346,8 @@ pub struct GameSession {
     pub offline: Option<String>,
     /// The other accounts' sessions, for splitscreen players (`account_sessions`).
     pub env: Vec<(&'static str, String)>,
+    /// Open Horizon: the name an offline or Ely.by account plays under (`--name`).
+    pub name: Option<String>,
 }
 
 /// The owner gate for the game about to start, then the selected account's session in a file
@@ -2385,6 +2420,7 @@ fn session_file(game_home: &Path, pass: Launch, env: Vec<(&'static str, String)>
     let mut out = GameSession {
         env,
         offline: pass.offline,
+        name: pass.plays_as,
         ..GameSession::default()
     };
     if let Some((account, secrets)) = pass.session {

@@ -39,7 +39,10 @@ pub fn bootstrap_path() -> Result<PathBuf> {
         return Ok(test_home().join("location.json"));
     }
     dirs::config_dir()
-        .map(|p| p.join("open-horizon-launcher-location").join("location.json"))
+        .map(|p| {
+            p.join("open-horizon-launcher-location")
+                .join("location.json")
+        })
         .ok_or_else(|| "Cannot locate the platform configuration folder for location.json".into())
 }
 

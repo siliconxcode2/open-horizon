@@ -10,7 +10,9 @@ impl Launcher {
     pub(crate) fn asking_owner(&self) -> bool {
         (!horizon_launcher::developer_offline::selected() || sign_in_preview())
             && (self.owner == Some(false) || sign_in_preview())
-            && (self.owner_screen_open || !self.settings.owner_notice_seen || sign_in_preview())
+            && (self.owner_screen_open
+                || (!self.settings.owner_notice_seen && self.settings.onboarded)
+                || sign_in_preview())
             && !self.asking_consent()
             && self.opening.is_none()
     }

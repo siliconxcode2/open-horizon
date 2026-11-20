@@ -17,7 +17,8 @@ pub const REPO: &str = horizon_release_sign::OPEN_HORIZON_REPO;
 pub fn issues_url() -> String {
     format!("https://github.com/{REPO}/issues")
 }
-pub const README_URL: &str = "https://github.com/siliconxcode2/open-horizon/blob/main/launcher/README.md";
+pub const README_URL: &str =
+    "https://github.com/siliconxcode2/open-horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -2324,6 +2325,68 @@ fn assets_folder(
     }
 }
 
+/// Open Horizon: the onboarding's two ways to get Minecraft's files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMethod {
+    /// From the player's own Java Edition install (any launcher's): nothing is downloaded.
+    Existing,
+    /// Downloaded from Mojang once a Microsoft account shows it owns the game, prepared, then
+    /// the download deleted.
+    Managed,
+}
+
+impl InstallMethod {
+    /// Where a preparation takes Minecraft's files from for this choice.
+    pub fn source(self) -> MinecraftFrom {
+        match self {
+            Self::Existing => MinecraftFrom::Install,
+            Self::Managed => MinecraftFrom::Mojang,
+        }
+    }
+}
+
+/// Open Horizon: deletes the Minecraft files this launcher downloaded from Mojang (its
+/// `minecraft/` folder) once `tag` is prepared with everything it copies from them (the sounds
+/// and the languages): the game never reads them again. Kept while a Java Edition instance
+/// starts from them. Returns the bytes freed; none when there was nothing to delete.
+pub fn clean_downloaded_minecraft(tag: &str) -> Result<Option<u64>, String> {
+    let own = data_dir().join("minecraft");
+    clean_downloaded_minecraft_in(
+        &own,
+        check_prepared(tag),
+        &resources(tag),
+        crate::instances::list().iter().any(|i| i.java.is_some()),
+    )
+}
+
+fn clean_downloaded_minecraft_in(
+    own: &Path,
+    prepared: bool,
+    resources: &Path,
+    java_instances: bool,
+) -> Result<Option<u64>, String> {
+    if !own.is_dir()
+        || !prepared
+        || java_instances
+        || !prepare::missing_extras(resources).is_empty()
+    {
+        return Ok(None);
+    }
+    fn size(path: &Path) -> u64 {
+        match fs::symlink_metadata(path) {
+            Ok(m) if m.is_dir() => fs::read_dir(path)
+                .map(|entries| entries.flatten().map(|e| size(&e.path())).sum())
+                .unwrap_or(0),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        }
+    }
+    let freed = size(own);
+    fs::remove_dir_all(own).map_err(|e| format!("{}: {e}", own.display()))?;
+    Ok(Some(freed))
+}
+
 /// Where the preparation takes Minecraft's files from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinecraftFrom {
@@ -4479,6 +4542,17 @@ pub struct Settings {
     /// one now (the owner gate's screen).
     #[serde(default)]
     pub owner_notice_seen: bool,
+    /// Open Horizon: the player has been through the first-run onboarding (account, then how
+    /// Minecraft's files are found).
+    #[serde(default)]
+    pub onboarded: bool,
+    /// Open Horizon: how the player chose to get Minecraft's files at onboarding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_method: Option<InstallMethod>,
+    /// Open Horizon: unset means on: after a preparation the Minecraft files the launcher
+    /// downloaded from Mojang are deleted (`clean_downloaded_minecraft`). `false` keeps them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clean_minecraft_downloads: Option<bool>,
     /// Seconds a partner banner (the sidebar's card or the Servers page's banner) has been on
     /// screen, over every start, up to `partner::SEEN_BEFORE_HIDE`: only then can the player hide it.
     #[serde(default)]

@@ -74,6 +74,7 @@ mod native_registry_consent;
 mod nav_strip;
 mod new_instance;
 mod notes_cache;
+mod onboarding_page;
 mod owner_page;
 mod packs_page;
 mod partner;
@@ -575,6 +576,7 @@ struct Launcher {
     /// The Mods page: the browser's search, installs and updates (`mods_page.rs`).
     mods: mods_page::Mods,
     github: github_mods_page::Github,
+    onboarding: onboarding_page::Onboarding,
     /// The instances, for the sidebar and Play, and their dialog (`instances_page.rs`).
     instances: instances_page::Instances,
     /// Home's Worlds section, of the selected instance (`worlds_page.rs`).

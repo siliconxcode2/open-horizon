@@ -281,6 +281,7 @@ impl Launcher {
             porting: None,
             mods: mods_page::Mods::new(cx),
             github: github_mods_page::Github::new(cx),
+            onboarding: onboarding_page::Onboarding::new(cx),
             instances: instances_page::Instances::default(),
             worlds: worlds_page::Worlds::default(),
             multiplayer: multiplayer_page::Multiplayer::default(),

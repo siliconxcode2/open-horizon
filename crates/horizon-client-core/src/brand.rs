@@ -52,7 +52,10 @@ mod tests {
 
     #[test]
     fn renames_the_product_but_not_the_word() {
-        assert_eq!(apply("Horizon Launcher is installed."), "Open Horizon Launcher is installed.");
+        assert_eq!(
+            apply("Horizon Launcher is installed."),
+            "Open Horizon Launcher is installed."
+        );
         assert_eq!(apply("Horizon's settings"), "Open Horizon's settings");
         assert_eq!(apply("Spustit Horizonu"), "Spustit Open Horizonu");
         assert_eq!(apply("(Horizon)"), "(Open Horizon)");

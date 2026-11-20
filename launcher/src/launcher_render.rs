@@ -53,6 +53,7 @@ impl Render for Launcher {
         self.friend_focused = self.friend_focus.is_focused(window);
         self.mods.note_focus(window);
         self.github.note_focus(window);
+        self.onboarding.note_focus(window);
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         self.settings_query_focused = self.settings_query_focus.is_focused(window);
@@ -357,6 +358,9 @@ impl Render for Launcher {
         } else if self.asking_consent() {
             root = root.child(self.consent_screen(cx));
         }
+        if self.onboarding_open() && !self.asking_owner() {
+            root = root.child(self.onboarding_screen(cx));
+        }
         if self.asking_owner() {
             root = root.child(self.owner_screen(cx));
         }
@@ -371,7 +375,7 @@ impl Render for Launcher {
                 .line_height(px(theme::WORDMARK.px * 0.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(t.ink)
-                .children("HORIZON".chars().enumerate().map(|(i, c)| {
+                .children("OPEN HORIZON".chars().enumerate().map(|(i, c)| {
                     let at = held - i as f32 * theme::STAGGER.as_secs_f32() * 1.5;
                     let p = ease_out_cubic(at / theme::ENTER.as_secs_f32());
                     div()

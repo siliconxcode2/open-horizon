@@ -425,6 +425,28 @@ impl Launcher {
                                     .filter(|_| e.starts_with("Exited with"));
                                 tail.map_or(e.clone(), |t| format!("{e}: {t}"))
                             });
+                            // Open Horizon: the Minecraft files downloaded for this are not needed now.
+                            if let (None, Some(t), true) = (
+                                &self.prepare_error,
+                                tag.as_deref(),
+                                self.settings.clean_minecraft_downloads != Some(false),
+                            ) {
+                                let (t, tx) = (backend::prepared_in(t), self.tx.clone());
+                                std::thread::spawn(move || {
+                                    let said = match backend::clean_downloaded_minecraft(&t) {
+                                        Ok(Some(freed)) => trf(
+                                            "Deleted the downloaded Minecraft files: {size} freed",
+                                            &[("size", &format!("{} MB", freed / 1_000_000))],
+                                        ),
+                                        Ok(None) => return,
+                                        Err(e) => trf(
+                                            "The downloaded Minecraft files were not deleted: {why}",
+                                            &[("why", &e)],
+                                        ),
+                                    };
+                                    let _ = tx.send(Msg::Line(Job::Prepare, said));
+                                });
+                            }
                             let (ended, error) = (
                                 tag.map(|t| backend::prepared_in(&t)),
                                 self.prepare_error.clone(),

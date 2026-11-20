@@ -25,7 +25,8 @@ pub const APP_NAME: &str = crate::brand::LAUNCHER;
 const BINARY: &str = "horizon-launcher.exe";
 const PUBLISHER: &str = crate::brand::NAME;
 const ABOUT_URL: &str = horizon_addresses::LAUNCHER_ABOUT;
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenHorizonLauncher";
+const UNINSTALL_KEY: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenHorizonLauncher";
 const OWN_KEY: &str = r"Software\OpenHorizon\Launcher";
 const ASIDE_PREFIX: &str = "horizon-launcher-uninstall-";
 

@@ -142,6 +142,21 @@ enum AccountCmd {
     },
     /// Play as this account
     Select { who: String },
+    /// Open Horizon: add an offline account (a name, no sign-in) and play as it. It plays on game
+    /// files already prepared; downloading Minecraft still needs a Microsoft account that owns it
+    AddOffline {
+        /// 3 to 16 letters, digits or _
+        name: String,
+    },
+    /// Open Horizon: sign in with an Ely.by account and play as it. The password is read from
+    /// standard input (one line), or from OPEN_HORIZON_ELYBY_PASSWORD
+    SignInElyby {
+        /// The Ely.by name or e-mail
+        login: String,
+        /// The two-step verification code, when the account has it on
+        #[arg(long)]
+        code: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1976,6 +1991,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                     "accounts": accounts.accounts.iter().map(|a| serde_json::json!({
                         "name": a.name, "uuid": a.uuid,
                         "selected": accounts.selected.as_ref() == Some(&a.uuid),
+                        "kind": accounts.kind(&a.uuid),
                         "authentication": account::session::status(account::store(), &a.uuid),
                     })).collect::<Vec<_>>(),
                     "sign_in_configured": account::client_id().is_some(),
@@ -1999,7 +2015,17 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                         account::session::State::Retry => format!(": {}", status.message),
                         _ => String::new(),
                     };
-                    println!("{mark} {}  {}  {}{why}", a.name, a.uuid, status.label());
+                    match accounts.kind(&a.uuid) {
+                        account::open::Kind::Microsoft => {
+                            println!("{mark} {}  {}  {}{why}", a.name, a.uuid, status.label())
+                        }
+                        account::open::Kind::Offline => {
+                            println!("{mark} {}  {}  offline", a.name, a.uuid)
+                        }
+                        account::open::Kind::ElyBy => {
+                            println!("{mark} {}  {}  Ely.by", a.name, a.uuid)
+                        }
+                    }
                 }
                 if !accounts.has_owner(account::store()) {
                     println!(
@@ -2088,6 +2114,48 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             accounts.play_as(&a.uuid)?;
             accounts.save()?;
             println!("The game plays as {}.", a.name);
+        }
+        AccountCmd::AddOffline { name } => {
+            let a = accounts.add_offline(&name)?;
+            accounts.save()?;
+            println!(
+                "Added the offline account {}; the game plays as it.",
+                a.name
+            );
+        }
+        AccountCmd::SignInElyby { login, code } => {
+            let password = match std::env::var("OPEN_HORIZON_ELYBY_PASSWORD") {
+                Ok(p) if !p.is_empty() => p,
+                _ => {
+                    eprintln!("Ely.by password for {login}:");
+                    let mut line = String::new();
+                    std::io::stdin()
+                        .read_line(&mut line)
+                        .map_err(|e| e.to_string())?;
+                    line.trim_end_matches(['\r', '\n']).to_owned()
+                }
+            };
+            let answer = account::open::elyby_sign_in(
+                horizon_addresses::ELYBY_AUTH,
+                &login,
+                &password,
+                code.as_deref(),
+            )?;
+            match answer {
+                account::open::ElyBySignIn::NeedsCode => {
+                    return Err(
+                        "This Ely.by account has two-step verification: add --code <code>.".into(),
+                    )
+                }
+                account::open::ElyBySignIn::Done(signed_in, secrets) => {
+                    accounts.add_elyby(account::store(), signed_in.clone(), &secrets)?;
+                    accounts.save()?;
+                    println!(
+                        "Signed in to Ely.by as {}; the game plays as it.",
+                        signed_in.name
+                    );
+                }
+            }
         }
     }
     Ok(())
