@@ -913,7 +913,7 @@ mod tests {
         assert_eq!(menus[0].name, "Open Horizon Launcher");
         assert!(matches!(
             &menus[0].items[0],
-            gpui::MenuItem::Action { name, .. } if name == "Quit Horizon Launcher"
+            gpui::MenuItem::Action { name, .. } if name == "Quit Open Horizon Launcher"
         ));
     }
 

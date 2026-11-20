@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn metadata_cannot_escape_the_fork_download_path() {
         assert_eq!(asset_url("v1/../../other?x#y", "a%b.zip"),
-            "https://github.com/horizon-rust/horizon/releases/download/v1%2F..%2F..%2Fother%3Fx%23y/a%25b.zip");
+            "https://github.com/siliconxcode2/open-horizon/releases/download/v1%2F..%2F..%2Fother%3Fx%23y/a%25b.zip");
     }
 
     #[test]
@@ -125,11 +125,9 @@ mod tests {
             "horizon-linux-x86_64.tar.gz"
         )
         .is_none());
-        // The launcher's own repository is upstream, so its pinned digest wins over anything fetched.
-        assert_eq!(
-            digest("v2026.10.12", "horizon-linux-x86_64.tar.gz", &[], tampered),
-            Ok("81fba8b54900ddc1c56f7cb5d235b67f4f762647d68be02d26068e98bd7ad4e0".to_owned())
-        );
+        // Open Horizon's repository is not upstream: upstream's pinned digests don't apply, and
+        // with no key nothing fetched installs.
+        assert!(digest("v2026.10.12", "horizon-linux-x86_64.tar.gz", &[], tampered).is_err());
     }
 
     #[test]
@@ -139,7 +137,9 @@ mod tests {
         let signature = key.sign("v2099.01.01", sums.as_bytes());
         // GitHub as it answers for a signed release (any tag: the files are what a replay would serve).
         let signed = |url: &str| -> Result<Option<Vec<u8>>, String> {
-            assert!(url.starts_with("https://github.com/horizon-rust/horizon/releases/download/"));
+            assert!(
+                url.starts_with("https://github.com/siliconxcode2/open-horizon/releases/download/")
+            );
             Ok(Some(
                 if url.ends_with(".sig") {
                     signature.clone()

@@ -2325,6 +2325,59 @@ fn assets_folder(
     }
 }
 
+/// Open Horizon: what the installed game versions pin of Minecraft's files (the newest first),
+/// else what the version this launcher was built with pins.
+pub fn current_pins() -> Option<sources::Pins> {
+    installed()
+        .iter()
+        .find_map(|tag| {
+            read_json(&version_dir(tag).join("research-lock.json"))
+                .and_then(|lock| sources::Pins::read(&lock))
+        })
+        .or_else(|| {
+            serde_json::from_str(include_str!("../../research-lock.json"))
+                .ok()
+                .and_then(|lock| sources::Pins::read(&lock))
+        })
+}
+
+/// Open Horizon: whether `dir` (any launcher's folder: `.minecraft`, Lunar Client's, CurseForge's
+/// …) holds the Minecraft version the game is made from: where the game's jar is, or what the
+/// folder lacks.
+pub fn locate_minecraft(dir: &Path) -> Result<PathBuf, String> {
+    let pins = current_pins().ok_or("This launcher doesn't know which Minecraft it needs.")?;
+    match sources::find(dir, &pins) {
+        Ok(found) => Ok(found.client),
+        Err(missing) => sources::deep_find(dir, &pins)
+            .map(|found| found.client)
+            .ok_or(missing),
+    }
+}
+
+/// Open Horizon: the launcher folders on this computer, each with whether it holds the version
+/// the game needs (a quick look at the known places, no deep search).
+pub fn detected_minecraft() -> Vec<(&'static str, PathBuf, bool)> {
+    let Some(pins) = current_pins() else {
+        return Vec::new();
+    };
+    let mut seen: Vec<PathBuf> = Vec::new();
+    sources::Folders::current()
+        .map(|f| sources::known_folders(sources::Os::current(), &f))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, dir)| dir.is_dir())
+        .filter(|(_, dir)| {
+            let new = !seen.contains(dir);
+            seen.push(dir.clone());
+            new
+        })
+        .map(|(name, dir)| {
+            let has = sources::find(&dir, &pins).is_ok();
+            (name, dir, has)
+        })
+        .collect()
+}
+
 /// Open Horizon: the onboarding's two ways to get Minecraft's files.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

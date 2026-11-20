@@ -31,8 +31,11 @@ pub const WEBSITE: &str = "https://playhorizon.dev";
 pub const MINECRAFT_WEBSITE: &str = "https://minecraft.net";
 pub const MINECRAFT_ISSUES: &str = "https://bugs.mojang.com";
 
-/// Ely.by's auth server (Yggdrasil-style), for Open Horizon's Ely.by accounts in the launcher.
-pub const ELYBY_AUTH: &str = "https://authserver.ely.by";
+/// Ely.by's OAuth 2.0 endpoints, for Open Horizon's Ely.by accounts in the launcher: the page the
+/// player signs in on, the token exchange, and the account's profile.
+pub const ELYBY_OAUTH_AUTHORIZE: &str = "https://account.ely.by/oauth2/v1";
+pub const ELYBY_OAUTH_TOKEN: &str = "https://account.ely.by/api/oauth2/v1/token";
+pub const ELYBY_ACCOUNT_INFO: &str = "https://account.ely.by/api/account/v1/info";
 
 /// Horizon's license and issue tracker, offered by the official build's Mods screen.
 pub const LICENSE: &str = "https://github.com/horizon-rust/horizon/blob/main/LICENSE";

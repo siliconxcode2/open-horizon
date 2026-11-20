@@ -177,7 +177,7 @@ fn an_index_is_refused_by_name_when_its_signature_or_contents_do_not_hold() {
     assert_eq!(
         read().unwrap_err(),
         Refusal::NoSdk {
-            build: "your Horizon version".into()
+            build: "your Open Horizon version".into()
         }
     );
     let good = index_of(&[], rust_toolchain::VERSION).to_json();
@@ -492,7 +492,7 @@ fn sizes_and_builds_read_plainly() {
     assert_eq!(megabytes(71_000_000), "71 MB");
     assert_eq!(megabytes(1), "1 MB");
     // A build with no name here is never shown as its commit.
-    assert_eq!(shown(COMMIT, None), "your Horizon version");
+    assert_eq!(shown(COMMIT, None), "your Open Horizon version");
     // A pin from a mod's manifest is cut only where a character ends.
     assert_eq!(shown("ééééé", None), "ééééé");
 }

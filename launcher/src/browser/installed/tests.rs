@@ -627,7 +627,7 @@ fn data_packs_go_into_a_world_when_something_in_them_runs() {
         .unwrap();
     assert_eq!(
         refused,
-        "Pack terrain would change nothing in Horizon yet: Horizon doesn't read its 1 worldgen \
+        "Pack terrain would change nothing in Open Horizon yet: Open Horizon doesn't read its 1 worldgen \
          world preset."
     );
     // A pack of only recipes, or only worldgen, now does something.

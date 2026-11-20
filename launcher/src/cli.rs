@@ -148,15 +148,9 @@ enum AccountCmd {
         /// 3 to 16 letters, digits or _
         name: String,
     },
-    /// Open Horizon: sign in with an Ely.by account and play as it. The password is read from
-    /// standard input (one line), or from OPEN_HORIZON_ELYBY_PASSWORD
-    SignInElyby {
-        /// The Ely.by name or e-mail
-        login: String,
-        /// The two-step verification code, when the account has it on
-        #[arg(long)]
-        code: Option<String>,
-    },
+    /// Open Horizon: sign in with an Ely.by account in your browser (OAuth, nothing typed here)
+    /// and play as it
+    SignInElyby,
 }
 
 #[derive(Subcommand)]
@@ -2123,39 +2117,24 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                 a.name
             );
         }
-        AccountCmd::SignInElyby { login, code } => {
-            let password = match std::env::var("OPEN_HORIZON_ELYBY_PASSWORD") {
-                Ok(p) if !p.is_empty() => p,
-                _ => {
-                    eprintln!("Ely.by password for {login}:");
-                    let mut line = String::new();
-                    std::io::stdin()
-                        .read_line(&mut line)
-                        .map_err(|e| e.to_string())?;
-                    line.trim_end_matches(['\r', '\n']).to_owned()
-                }
-            };
-            let answer = account::open::elyby_sign_in(
-                horizon_addresses::ELYBY_AUTH,
-                &login,
-                &password,
-                code.as_deref(),
+        AccountCmd::SignInElyby => {
+            let started =
+                account::open::elyby_oauth_start(horizon_addresses::ELYBY_OAUTH_AUTHORIZE)?;
+            eprintln!(
+                "To sign in with Ely.by, open this page in a browser:\n{}",
+                started.url
+            );
+            let (signed_in, secrets) = started.finish(
+                horizon_addresses::ELYBY_OAUTH_TOKEN,
+                horizon_addresses::ELYBY_ACCOUNT_INFO,
+                &|| false,
             )?;
-            match answer {
-                account::open::ElyBySignIn::NeedsCode => {
-                    return Err(
-                        "This Ely.by account has two-step verification: add --code <code>.".into(),
-                    )
-                }
-                account::open::ElyBySignIn::Done(signed_in, secrets) => {
-                    accounts.add_elyby(account::store(), signed_in.clone(), &secrets)?;
-                    accounts.save()?;
-                    println!(
-                        "Signed in to Ely.by as {}; the game plays as it.",
-                        signed_in.name
-                    );
-                }
-            }
+            accounts.add_elyby(account::store(), signed_in.clone(), &secrets)?;
+            accounts.save()?;
+            println!(
+                "Signed in to Ely.by as {}; the game plays as it.",
+                signed_in.name
+            );
         }
     }
     Ok(())

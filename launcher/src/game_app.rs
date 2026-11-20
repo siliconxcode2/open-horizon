@@ -417,7 +417,7 @@ mod tests {
             &version.join("horizon-ctl")
         ));
         let plist = fs::read_to_string(version.join("Horizon.app/Contents/Info.plist")).unwrap();
-        assert!(plist.contains("<string>Horizon</string>"));
+        assert!(plist.contains("<string>Open Horizon</string>"));
         // The mic prompt macOS needs before a native mod may open the microphone: a key with a
         // nonempty localized value, not the placeholder the template ships with.
         let (_, rest) = plist

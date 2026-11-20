@@ -42,7 +42,7 @@ Install a local unsigned developer build from a trusted checkout.
 
     horizon-launcher developer-install --program <PROGRAM> --trust-unsigned <CHECKOUT>
 
-- `CHECKOUT`: The trusted clean Horizon checkout to package
+- `CHECKOUT`: The trusted clean Open Horizon checkout to package
 - `--program`: The real horizon-client executable built from that committed checkout
 - `--trust-unsigned`: Allow executing this checkout's build code and unsigned game with your rights
 
@@ -237,6 +237,24 @@ Play as this account.
 - `WHO`
 
 MCP: `account_select`.
+
+## `horizon-launcher account add-offline`
+
+Open Horizon: add an offline account (a name, no sign-in) and play as it. It plays on game files already prepared; downloading Minecraft still needs a Microsoft account that owns it.
+
+    horizon-launcher account add-offline <NAME>
+
+- `NAME`: 3 to 16 letters, digits or _
+
+MCP: `account_add_offline`.
+
+## `horizon-launcher account sign-in-elyby`
+
+Open Horizon: sign in with an Ely.by account in your browser (OAuth, nothing typed here) and play as it.
+
+    horizon-launcher account sign-in-elyby
+
+MCP: `account_sign_in_elyby`.
 
 ## `horizon-launcher settings`
 

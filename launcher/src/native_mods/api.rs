@@ -855,7 +855,7 @@ mod tests {
                 &internals::Catalog::default(),
             )
             .unwrap_err();
-            assert!(error.contains("Update Horizon and rebuild"), "{error}");
+            assert!(error.contains("Update Open Horizon and rebuild"), "{error}");
             assert!(!stage_dir.join(GAME).exists());
             assert!(!stage_dir.join("native-api").exists());
         }

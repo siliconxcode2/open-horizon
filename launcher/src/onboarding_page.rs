@@ -5,71 +5,68 @@
 //! deletes the download (`backend::clean_downloaded_minecraft`).
 use super::line_edit::{self, Key, LineEdit};
 use super::*;
-use horizon_launcher::account::open::{self as accounts_open, ElyBySignIn};
+use horizon_launcher::account::open::{self as accounts_open, ElyBySecrets};
 use horizon_launcher::backend::InstallMethod;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Step {
     Account,
     Install,
+    /// "I already have Java Edition": which launcher folder holds it.
+    Locate,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Field {
-    Name,
-    Login,
-    Password,
-    Code,
-}
+/// A launcher folder found on this computer: its launcher's name, the folder, and whether it
+/// holds the Minecraft version the game is made from.
+type Detected = Vec<(&'static str, std::path::PathBuf, bool)>;
+
+/// Ely.by's answer to a sign-in, from its thread.
+type ElyByAnswer = Result<(account::Account, ElyBySecrets), String>;
 
 pub(super) struct Onboarding {
     pub(super) step: Step,
     name: LineEdit,
-    login: LineEdit,
-    password: LineEdit,
-    code: LineEdit,
-    focus: [FocusHandle; 4],
-    focused: Option<Field>,
-    /// Ely.by asked for the two-step code.
-    needs_code: bool,
-    /// An Ely.by sign-in is under way.
-    signing_in: bool,
+    focus: FocusHandle,
+    focused: bool,
+    /// The Ely.by page the browser was sent to, while that sign-in is under way.
+    elyby_url: Option<String>,
+    /// Set to stop waiting for the browser.
+    elyby_cancel: Arc<AtomicBool>,
     error: Option<String>,
-    /// Ely.by's answer, from its thread.
-    rx: Option<std::sync::mpsc::Receiver<Result<ElyBySignIn, String>>>,
+    rx: Option<std::sync::mpsc::Receiver<ElyByAnswer>>,
+    /// The launcher folders found, once looked for.
+    detected: Option<Detected>,
+    /// The folder the player picked, and what was found in it (the game's jar, or what it lacks).
+    chosen: Option<(
+        std::path::PathBuf,
+        Option<Result<std::path::PathBuf, String>>,
+    )>,
 }
 
 impl Onboarding {
     pub(super) fn new(cx: &mut App) -> Self {
-        let handle = |cx: &mut App, i| cx.focus_handle().tab_index(i).tab_stop(true);
         Self {
             step: Step::Account,
             name: LineEdit::new(String::new(), 16, 24),
-            login: LineEdit::new(String::new(), 100, 32),
-            password: LineEdit::new(String::new(), 200, 32),
-            code: LineEdit::new(String::new(), 10, 12),
-            focus: [handle(cx, 0), handle(cx, 1), handle(cx, 2), handle(cx, 3)],
-            focused: None,
-            needs_code: false,
-            signing_in: false,
+            focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            focused: false,
+            elyby_url: None,
+            elyby_cancel: Arc::new(AtomicBool::new(false)),
             error: None,
             rx: None,
+            detected: None,
+            chosen: None,
         }
     }
 
     pub(super) fn note_focus(&mut self, window: &Window) {
-        self.focused = [Field::Name, Field::Login, Field::Password, Field::Code]
-            .into_iter()
-            .find(|f| self.focus[*f as usize].is_focused(window));
+        self.focused = self.focus.is_focused(window);
     }
 
-    fn edit(&mut self, field: Field) -> &mut LineEdit {
-        match field {
-            Field::Name => &mut self.name,
-            Field::Login => &mut self.login,
-            Field::Password => &mut self.password,
-            Field::Code => &mut self.code,
-        }
+    fn signing_in(&self) -> bool {
+        self.rx.is_some()
     }
 }
 
@@ -117,34 +114,43 @@ impl Launcher {
         }
     }
 
+    /// Opens Ely.by's sign-in page in the browser (OAuth 2.0 with PKCE, `account::open`) and
+    /// waits on a thread for Ely.by to send the player back.
     fn start_elyby_sign_in(&mut self, cx: &mut Context<Self>) {
-        let o = &mut self.onboarding;
-        if o.signing_in || o.login.text().trim().is_empty() || o.password.text().is_empty() {
+        if self.onboarding.signing_in() {
             return;
         }
-        let (login, password) = (o.login.text().to_owned(), o.password.text().to_owned());
-        let code = o.needs_code.then(|| o.code.text().to_owned());
+        let started =
+            match accounts_open::elyby_oauth_start(horizon_addresses::ELYBY_OAUTH_AUTHORIZE) {
+                Ok(started) => started,
+                Err(e) => {
+                    self.onboarding.error = Some(e);
+                    return;
+                }
+            };
+        cx.open_url(&started.url);
+        let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::channel();
+        let o = &mut self.onboarding;
+        o.elyby_url = Some(started.url.clone());
+        o.elyby_cancel = cancel.clone();
         o.rx = Some(rx);
-        o.signing_in = true;
         o.error = None;
         std::thread::spawn(move || {
-            let _ = tx.send(accounts_open::elyby_sign_in(
-                horizon_addresses::ELYBY_AUTH,
-                &login,
-                &password,
-                code.as_deref(),
+            let _ = tx.send(started.finish(
+                horizon_addresses::ELYBY_OAUTH_TOKEN,
+                horizon_addresses::ELYBY_ACCOUNT_INFO,
+                &|| cancel.load(Ordering::Relaxed),
             ));
         });
-        // Ely.by answers on that thread: look for its answer until it comes.
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
-                .timer(Duration::from_millis(100))
+                .timer(Duration::from_millis(150))
                 .await;
             let waiting = this.update(cx, |this, cx| {
                 this.take_elyby_answer();
                 cx.notify();
-                this.onboarding.signing_in
+                this.onboarding.signing_in()
             });
             if !waiting.unwrap_or(false) {
                 break;
@@ -153,7 +159,11 @@ impl Launcher {
         .detach();
     }
 
-    /// Reads Ely.by's answer when it has come (each frame while the sign-in is under way).
+    fn cancel_elyby_sign_in(&mut self) {
+        self.onboarding.elyby_cancel.store(true, Ordering::Relaxed);
+    }
+
+    /// Takes Ely.by's answer when it has come.
     fn take_elyby_answer(&mut self) {
         let Some(answer) = self
             .onboarding
@@ -163,16 +173,10 @@ impl Launcher {
         else {
             return;
         };
-        let o = &mut self.onboarding;
-        o.rx = None;
-        o.signing_in = false;
+        self.onboarding.rx = None;
+        self.onboarding.elyby_url = None;
         match answer {
-            Ok(ElyBySignIn::NeedsCode) => {
-                o.needs_code = true;
-                o.error = Some(tr("Enter the code from your authenticator app.").into());
-            }
-            Ok(ElyBySignIn::Done(signed_in, secrets)) => {
-                o.password.set(String::new());
+            Ok((signed_in, secrets)) => {
                 let mut accounts = Accounts::load();
                 let kept = accounts
                     .add_elyby(account::store(), signed_in, &secrets)
@@ -182,29 +186,89 @@ impl Launcher {
                     Err(e) => self.onboarding.error = Some(e),
                 }
             }
-            Err(e) => o.error = Some(tr(&e).to_string()),
+            Err(e) => self.onboarding.error = Some(tr(&e).to_string()),
         }
     }
 
-    fn onboarding_field(
-        &mut self,
-        field: Field,
-        placeholder: &'static str,
-        mask: bool,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    /// Opens the Locate step and looks for launcher folders on a thread.
+    fn start_locate(&mut self, cx: &mut Context<Self>) {
+        self.onboarding.step = Step::Locate;
+        if self.onboarding.detected.is_some() {
+            return;
+        }
+        let task = cx
+            .background_executor()
+            .spawn(async { backend::detected_minecraft() });
+        cx.spawn(async move |this, cx| {
+            let found = task.await;
+            let _ = this.update(cx, |this, cx| {
+                // The first folder that has the game is picked for the player.
+                if this.onboarding.chosen.is_none() {
+                    if let Some((_, dir, _)) = found.iter().find(|(_, _, has)| *has) {
+                        let dir = dir.clone();
+                        this.check_folder(dir, cx);
+                    }
+                }
+                this.onboarding.detected = Some(found);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Picks `dir` and looks for the game in it (in depth, any launcher's layout).
+    fn check_folder(&mut self, dir: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.onboarding.chosen = Some((dir.clone(), None));
+        let task = cx
+            .background_executor()
+            .spawn(async move { backend::locate_minecraft(&dir) });
+        cx.spawn(async move |this, cx| {
+            let found = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if let Some((_, result)) = &mut this.onboarding.chosen {
+                    *result = Some(found);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn choose_minecraft_folder(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(tr("Choose").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(mut paths))) = paths.await {
+                if let Some(path) = paths.pop() {
+                    let _ = this.update(cx, |this, cx| {
+                        this.check_folder(path, cx);
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Prepares from the folder found, from now on.
+    fn use_chosen_folder(&mut self) {
+        if let Some((dir, Some(Ok(_)))) = self.onboarding.chosen.clone() {
+            self.settings.minecraft_dir = Some(dir);
+            self.finish_onboarding(InstallMethod::Existing);
+        }
+    }
+
+    fn onboarding_name_field(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         use crate::glass_ui::white;
         let t = self.theme;
-        let focused = self.onboarding.focused == Some(field);
-        let id: &'static str = match field {
-            Field::Name => "onboarding-name",
-            Field::Login => "onboarding-login",
-            Field::Password => "onboarding-password",
-            Field::Code => "onboarding-code",
-        };
+        let focused = self.onboarding.focused;
         let el = div()
-            .id(id)
-            .track_focus(&self.onboarding.focus[field as usize])
+            .id("onboarding-name")
+            .track_focus(&self.onboarding.focus)
             .flex()
             .items_center()
             .w_full()
@@ -218,28 +282,20 @@ impl Launcher {
             .text_size(px(14.))
             .cursor_text()
             .child(line_edit::content(
-                match field {
-                    Field::Name => &self.onboarding.name,
-                    Field::Login => &self.onboarding.login,
-                    Field::Password => &self.onboarding.password,
-                    Field::Code => &self.onboarding.code,
-                },
+                &self.onboarding.name,
                 &t,
                 focused,
                 false,
-                mask,
-                placeholder,
+                false,
+                "Your player name",
             ))
-            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                window.focus(&this.onboarding.focus[field as usize], cx);
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                window.focus(&this.onboarding.focus, cx);
                 cx.notify();
             }))
-            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
-                match line_edit::handle(this.onboarding.edit(field), ev, cx) {
-                    Key::Enter => match field {
-                        Field::Name => this.add_offline_account(),
-                        _ => this.start_elyby_sign_in(cx),
-                    },
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                match line_edit::handle(&mut this.onboarding.name, ev, cx) {
+                    Key::Enter => this.add_offline_account(),
                     Key::Escape => window.blur(cx),
                     Key::Pass => return,
                     _ => {}
@@ -247,12 +303,18 @@ impl Launcher {
                 cx.stop_propagation();
                 cx.notify();
             }));
-        line_edit::mouse(el, cx, move |this: &mut Launcher| {
-            this.onboarding.edit(field)
-        })
+        line_edit::mouse(el, cx, |this: &mut Launcher| &mut this.onboarding.name)
     }
 
     pub(crate) fn onboarding_screen(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
+        // A player who already has an account (added from the CLI, or kept from before) goes
+        // straight to how the game's files are found.
+        if self.onboarding.step == Step::Account
+            && !self.onboarding.signing_in()
+            && !self.accounts.accounts.is_empty()
+        {
+            self.onboarding.step = Step::Install;
+        }
         use crate::glass_ui::{self as ui, white};
         use horizon_theme::glass::{ink, radius};
         let t = self.theme;
@@ -300,7 +362,7 @@ impl Launcher {
                     .child(
                         panel()
                             .child(ui::text(15., FontWeight::SEMIBOLD, ink::FULL).child(tr("Offline")))
-                            .child(self.onboarding_field(Field::Name, "Your player name", false, cx))
+                            .child(self.onboarding_name_field(cx))
                             .child(
                                 ui::button("onboarding-offline".into(), tr("Play offline").into(), Kind::Primary, &t)
                                     .h(px(40.))
@@ -311,22 +373,43 @@ impl Launcher {
                             ),
                     )
                     .child({
-                        let mut ely = panel()
+                        let ely = panel()
                             .child(ui::text(15., FontWeight::SEMIBOLD, ink::FULL).child(tr("Ely.by")))
-                            .child(self.onboarding_field(Field::Login, "Ely.by name or e-mail", false, cx))
-                            .child(self.onboarding_field(Field::Password, "Password", true, cx));
-                        if self.onboarding.needs_code {
-                            ely = ely.child(self.onboarding_field(Field::Code, "Two-step code", false, cx));
+                            .child(ui::text(13., FontWeight::NORMAL, ink::BODY).child(tr(
+                                "Sign in on Ely.by's own page in your browser. Open Horizon never sees your password.",
+                            )));
+                        match self.onboarding.elyby_url.clone() {
+                            None => ely.child(
+                                ui::button("onboarding-elyby".into(), tr("Sign in with Ely.by").into(), Kind::Secondary, &t)
+                                    .h(px(40.))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                        this.start_elyby_sign_in(cx);
+                                        cx.notify();
+                                    })),
+                            ),
+                            Some(url) => ely
+                                .child(ui::text(13., FontWeight::NORMAL, ink::QUIET).child(tr(
+                                    "Waiting for Ely.by in your browser… the window goes on by itself.",
+                                )))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap(px(8.))
+                                        .child(
+                                            ui::button("onboarding-elyby-again".into(), tr("Open the page again").into(), Kind::Secondary, &t)
+                                                .h(px(40.))
+                                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                                        )
+                                        .child(
+                                            ui::button("onboarding-elyby-cancel".into(), tr("Cancel").into(), Kind::Ghost, &t)
+                                                .h(px(40.))
+                                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                                    this.cancel_elyby_sign_in();
+                                                    cx.notify();
+                                                })),
+                                        ),
+                                ),
                         }
-                        let label = if self.onboarding.signing_in { "Signing in…" } else { "Sign in with Ely.by" };
-                        ely.child(
-                            ui::button("onboarding-elyby".into(), tr(label).into(), Kind::Secondary, &t)
-                                .h(px(40.))
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    this.start_elyby_sign_in(cx);
-                                    cx.notify();
-                                })),
-                        )
                     });
                 if let Some(e) = &self.onboarding.error {
                     card = card.child(
@@ -376,7 +459,10 @@ impl Launcher {
                         .child(ui::text(16., FontWeight::SEMIBOLD, ink::FULL).child(tr(title)))
                         .child(ui::text(13., FontWeight::NORMAL, ink::BODY).child(tr(about)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.finish_onboarding(method);
+                            match method {
+                                InstallMethod::Existing => this.start_locate(cx),
+                                InstallMethod::Managed => this.finish_onboarding(method),
+                            }
                             cx.notify();
                         }))
                 };
@@ -395,6 +481,151 @@ impl Launcher {
                         "Open Horizon downloads Minecraft from Mojang, prepares it, then deletes the download. Mojang's download needs a one-time sign-in with the Microsoft account that owns Minecraft.",
                         InstallMethod::Managed,
                     ));
+            }
+            Step::Locate => {
+                let version = backend::current_pins()
+                    .map(|p| p.version)
+                    .unwrap_or_default();
+                card = card
+                    .child(heading("Minecraft's files", "Find your Minecraft folder"))
+                    .child(ui::text(14., FontWeight::NORMAL, ink::BODY).mt(px(10.)).child(trf(
+                        "Pick the folder your launcher keeps Minecraft in: .minecraft for the official launcher, Badlion, Feather or TLauncher, .lunarclient for Lunar Client, or any other launcher's. It needs Minecraft {version}: play it once there if it isn't.",
+                        &[("version", &version)],
+                    )));
+                let mut list = div().mt(px(16.)).flex().flex_col().gap(px(8.));
+                match &self.onboarding.detected {
+                    None => {
+                        list = list.child(
+                            ui::text(13., FontWeight::NORMAL, ink::QUIET)
+                                .child(tr("Looking for launchers on this computer…")),
+                        )
+                    }
+                    Some(found) if found.is_empty() => {
+                        list = list.child(ui::text(13., FontWeight::NORMAL, ink::QUIET).child(tr(
+                            "No launcher folder found in the usual places: choose yours.",
+                        )))
+                    }
+                    Some(found) => {
+                        for (i, (name, dir, has)) in found.iter().enumerate() {
+                            let picked = self
+                                .onboarding
+                                .chosen
+                                .as_ref()
+                                .is_some_and(|(chosen, _)| chosen == dir);
+                            let status = if *has {
+                                trf("Has Minecraft {version}", &[("version", &version)])
+                            } else {
+                                trf("No Minecraft {version} here", &[("version", &version)])
+                            };
+                            let target = dir.clone();
+                            list = list.child(
+                                div()
+                                    .id(("onboarding-folder", i))
+                                    .p(px(12.))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.))
+                                    .rounded(px(radius::ROW))
+                                    .bg(white(if picked { 0.10 } else { 0.045 }))
+                                    .border_1()
+                                    .border_color(if picked { t.accent } else { white(0.08) })
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(white(0.08)))
+                                    .child(
+                                        ui::text(14., FontWeight::SEMIBOLD, ink::FULL)
+                                            .child(format!("{} — {status}", capitalized(tr(name)))),
+                                    )
+                                    .child(
+                                        ui::text(12., FontWeight::NORMAL, ink::QUIET)
+                                            .child(dir.display().to_string()),
+                                    )
+                                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                        this.check_folder(target.clone(), cx);
+                                        cx.notify();
+                                    })),
+                            );
+                        }
+                    }
+                }
+                card = card.child(list);
+                if let Some((dir, result)) = &self.onboarding.chosen {
+                    let (text, color) = match result {
+                        None => (
+                            trf("Looking in {dir}…", &[("dir", &dir.display().to_string())]),
+                            None,
+                        ),
+                        Some(Ok(jar)) => (
+                            trf(
+                                "Found Minecraft {version}: {jar}",
+                                &[("version", &version), ("jar", &jar.display().to_string())],
+                            ),
+                            Some(0x8be9a8),
+                        ),
+                        Some(Err(why)) => {
+                            (trf("Not usable: {why}", &[("why", why)]), Some(0xff8a80))
+                        }
+                    };
+                    let mut line = ui::text(13., FontWeight::NORMAL, ink::BODY)
+                        .mt(px(12.))
+                        .child(text);
+                    if let Some(color) = color {
+                        line = line.text_color(gpui::rgb(color));
+                    }
+                    card = card.child(line);
+                }
+                let ready = matches!(self.onboarding.chosen, Some((_, Some(Ok(_)))));
+                let mut use_it = ui::button(
+                    "onboarding-use-folder".into(),
+                    tr("Use this folder").into(),
+                    Kind::Primary,
+                    &t,
+                )
+                .h(px(40.));
+                use_it = if ready {
+                    use_it.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.use_chosen_folder();
+                        cx.notify();
+                    }))
+                } else {
+                    use_it.opacity(0.5)
+                };
+                card = card.child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .mt(px(20.))
+                        .child(use_it)
+                        .child(
+                            ui::button(
+                                "onboarding-choose-folder".into(),
+                                tr("Choose folder…").into(),
+                                Kind::Secondary,
+                                &t,
+                            )
+                            .h(px(40.))
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, _, cx| {
+                                    this.choose_minecraft_folder(cx);
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .child(
+                            ui::button(
+                                "onboarding-back".into(),
+                                tr("Back").into(),
+                                Kind::Ghost,
+                                &t,
+                            )
+                            .h(px(40.))
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, _, cx| {
+                                    this.onboarding.step = Step::Install;
+                                    cx.notify();
+                                },
+                            )),
+                        ),
+                );
             }
         }
         div()
@@ -420,4 +651,13 @@ impl Launcher {
             )
             .child(card)
     }
+}
+
+/// `text` with its first letter upper-case ("the official launcher" heads a row).
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }

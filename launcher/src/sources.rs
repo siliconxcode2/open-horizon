@@ -151,6 +151,13 @@ pub fn known_folders(os: Os, f: &Folders) -> Vec<(&'static str, PathBuf)> {
             ("Dawn Client", f.data.join(".dawn")),
         ],
     };
+    // Open Horizon: launchers that keep the official layout somewhere of their own. Badlion,
+    // Feather, TLauncher and SKLauncher use the official `.minecraft` above; Lunar Client keeps
+    // its jars under `.lunarclient` (searched in depth, `deep_find`, when it is chosen).
+    list.extend([
+        ("CurseForge", f.home.join("curseforge/minecraft/Install")),
+        ("Lunar Client", f.home.join(".lunarclient")),
+    ]);
     // Names every system shares: the Modrinth App before its rename, GDLauncher and its
     // previous version (GDLauncher Next).
     list.extend([
@@ -273,6 +280,86 @@ fn launcher_of(path: &Path) -> Option<&'static str> {
             ".dawn" | "dawn" => Some("Dawn Client"),
             _ => None,
         })
+}
+
+/// The smallest jar a deep search hashes: a client jar is tens of megabytes (the tests' are tiny).
+const CLIENT_JAR_MIN: u64 = if cfg!(test) { 0 } else { 5_000_000 };
+
+/// Folders a deep search never enters: a game folder's own files, big and never the game's jar.
+const NOT_GAME: &[&str] = &[
+    "saves",
+    "screenshots",
+    "logs",
+    "crash-reports",
+    "resourcepacks",
+    "shaderpacks",
+    "texturepacks",
+    "mods",
+    "config",
+    "objects",
+    "natives",
+    "jre",
+    "runtime",
+    "cache2",
+];
+
+/// Open Horizon: the pinned client jar anywhere in `dir`, up to six folders deep, for a launcher
+/// whose layout isn't known (Lunar Client, a moved or renamed `.minecraft`). Only `.jar` files of
+/// a client jar's size are hashed. The libraries and assets are the ones of the nearest folder
+/// above the jar that has them, else `dir`'s.
+pub fn deep_find(dir: &Path, pins: &Pins) -> Option<Found> {
+    fn walk(dir: &Path, depth: usize, pins: &Pins, budget: &mut usize) -> Option<PathBuf> {
+        let entries = fs::read_dir(dir).ok()?;
+        let mut folders = Vec::new();
+        for entry in entries.flatten() {
+            if *budget == 0 {
+                return None;
+            }
+            *budget -= 1;
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if kind.is_dir() {
+                if !NOT_GAME.contains(&name.as_str()) {
+                    folders.push(path);
+                }
+            } else if kind.is_file() && name.ends_with(".jar") {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if (CLIENT_JAR_MIN..=200_000_000).contains(&size)
+                    && sha1_file(&path).as_ref() == Some(&pins.client_sha1)
+                {
+                    return Some(path);
+                }
+            }
+        }
+        if depth == 0 {
+            return None;
+        }
+        folders.sort();
+        folders
+            .iter()
+            .find_map(|f| walk(f, depth - 1, pins, budget))
+    }
+    // A bound on the entries looked at, so a home folder chosen by mistake ends quickly.
+    let mut budget = 200_000;
+    let client = walk(dir, 6, pins, &mut budget)?;
+    let base = client
+        .ancestors()
+        .skip(1)
+        .take_while(|a| a.starts_with(dir))
+        .find(|a| a.join("libraries").is_dir() || a.join("assets").is_dir())
+        .unwrap_or(dir)
+        .to_path_buf();
+    let v = &pins.version;
+    let manifest = base.join(format!("versions/{v}/{v}.json"));
+    let manifest = pins.manifest_accepted(&manifest).then_some(manifest);
+    Some(Found {
+        base,
+        client,
+        manifest,
+    })
 }
 
 /// The pinned version in one launcher folder, or what the folder lacks. The folder holding
@@ -400,6 +487,13 @@ pub fn resolve(
             }
             Err(missing) if dir.as_path() == chosen => checked.push((dir, missing)),
             Err(_) => {}
+        }
+    }
+    // Open Horizon: any launcher's folder (Lunar Client's, a renamed `.minecraft`): the pinned
+    // client jar anywhere inside it.
+    if found.is_none() {
+        if let Some(f) = deep_find(chosen, pins) {
+            found = Some(("the chosen folder", f));
         }
     }
     let same = |a: &Path, b: &Path| a == b || fs::canonicalize(a).ok() == fs::canonicalize(b).ok();

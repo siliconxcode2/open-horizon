@@ -620,3 +620,35 @@ fn each_system_has_its_launcher_folders() {
     assert!(got.contains(&"ATLauncher: C:/Users/r/AppData/Roaming/ATLauncher".into()));
     assert!(got.contains(&"Dawn Client: C:/Users/r/AppData/Roaming/.dawn".into()));
 }
+
+#[test]
+fn a_launcher_of_any_layout_is_searched_in_depth() {
+    // Lunar Client's kind of folder: the game jar deep inside, under a name of its own, with
+    // the libraries and assets beside it, and saves that are never looked in.
+    let s = Scratch::new("deep");
+    let lunar = s.0.join(".lunarclient");
+    s.write(
+        ".lunarclient/offline/multiver/game/26.3/client-26.3.jar",
+        CLIENT,
+    );
+    s.write(
+        ".lunarclient/offline/multiver/game/libraries/org/lib/1/lib-1.jar",
+        b"lib",
+    );
+    s.write(
+        ".lunarclient/offline/multiver/game/assets/indexes/30.json",
+        b"{}",
+    );
+    s.write(".lunarclient/saves/world/level.jar", CLIENT);
+    let found = deep_find(&lunar, &pins()).expect("found in depth");
+    assert_eq!(
+        found.client,
+        lunar.join("offline/multiver/game/26.3/client-26.3.jar")
+    );
+    assert_eq!(found.base, lunar.join("offline/multiver/game"));
+    assert_eq!(found.manifest, None);
+    // Another jar of the same name but not the game: nothing.
+    let other = Scratch::new("deep-other");
+    other.write("game/client-26.3.jar", b"not it");
+    assert!(deep_find(&other.0, &pins()).is_none());
+}
